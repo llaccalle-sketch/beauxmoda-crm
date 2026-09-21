@@ -642,16 +642,28 @@
 
     <script>
         // ===== CONFIGURACIÓN SUPABASE =====
-        // ⚠️ REEMPLAZA ESTOS VALORES CON LOS TUYOS DE SUPABASE
-       const SUPABASE_URL = 'https://rldxsiknawkbmgdtoqlg.supabase.co';
-       const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZHhzaWtuYXdrYm1nZHRvcWxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5NTAyMTUsImV4cCI6MjEwNTUyNjIxNX0.uHFiZGAM1q3rvXWky8f9ErRTucOC_9PDxRMcBIT7J-I';
-        // Inicializar Supabase
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const SUPABASE_URL = 'https://rldxsiknawkbmgdtoqlg.supabase.co';
+        const SUPABASE_ANON_KEY = 'PEGA_TU_ANON_KEY_AQUI';
+        
+        let supabase = null;
+        let useLocalStorage = false;
+        
+        try {
+            if (SUPABASE_URL.includes('TU-PROYECTO') || SUPABASE_ANON_KEY.includes('PEGA_TU')) {
+                console.warn('️ Credenciales de Supabase no configuradas. Usando localStorage.');
+                useLocalStorage = true;
+            } else {
+                supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            }
+        } catch (e) {
+            console.warn('⚠️ Error inicializando Supabase:', e);
+            useLocalStorage = true;
+        }
         
         // ===== DATA =====
-        let clients = [];
-        let activities = [];
-        let userName = 'Tu Nombre';
+        let clients = JSON.parse(localStorage.getItem('bm_clients')) || [];
+        let activities = JSON.parse(localStorage.getItem('bm_activities')) || [];
+        let userName = localStorage.getItem('bm_user_name') || 'Tu Nombre';
         let editingClientId = null;
         let extractedData = null;
         let itemCounter = 0;
@@ -663,113 +675,117 @@
 
         const statusConfig = { preparando: { title: 'Preparando', count: 0 }, enviado: { title: 'Enviado', count: 0 }, entregado: { title: 'Entregado', count: 0 } };
 
-        // ===== FUNCIONES DE API CON SUPABASE =====
+        // ===== API FUNCTIONS CON FALLBACK =====
         async function apiCall(action, data = null) {
+            if (useLocalStorage || !supabase) {
+                return handleLocalStorage(action, data);
+            }
+            
             try {
                 let result;
-                
                 switch(action) {
                     case 'get_clients':
-                        const { data: clientsData, error: clientsError } = await supabase
-                            .from('clients')
-                            .select('*')
-                            .order('created_at', { ascending: false });
+                        const { data: clientsData, error: clientsError } = await supabase.from('clients').select('*').order('created_at', { ascending: false });
                         if (clientsError) throw clientsError;
                         result = { success: true, data: clientsData || [] };
                         break;
-                        
                     case 'save_client':
-                        const { error: saveError } = await supabase
-                            .from('clients')
-                            .upsert(data, { onConflict: 'id' });
+                        const { error: saveError } = await supabase.from('clients').upsert(data, { onConflict: 'id' });
                         if (saveError) throw saveError;
                         result = { success: true };
                         break;
-                        
                     case 'delete_client':
-                        const { error: deleteError } = await supabase
-                            .from('clients')
-                            .delete()
-                            .eq('id', data.id);
+                        const { error: deleteError } = await supabase.from('clients').delete().eq('id', data.id);
                         if (deleteError) throw deleteError;
                         result = { success: true };
                         break;
-                        
                     case 'update_tracking':
-                        const { error: trackError } = await supabase
-                            .from('clients')
-                            .update({ trackingNumber: data.trackingNumber })
-                            .eq('id', data.id);
+                        const { error: trackError } = await supabase.from('clients').update({ trackingNumber: data.trackingNumber }).eq('id', data.id);
                         if (trackError) throw trackError;
                         result = { success: true };
                         break;
-                        
                     case 'update_status':
                         const progress = data.status === 'preparando' ? 25 : data.status === 'enviado' ? 60 : 100;
-                        const { error: statusError } = await supabase
-                            .from('clients')
-                            .update({ status: data.status, progress })
-                            .eq('id', data.id);
+                        const { error: statusError } = await supabase.from('clients').update({ status: data.status, progress }).eq('id', data.id);
                         if (statusError) throw statusError;
                         result = { success: true };
                         break;
-                        
                     case 'get_activities':
-                        const { data: actData, error: actError } = await supabase
-                            .from('activities')
-                            .select('*')
-                            .order('created_at', { ascending: false })
-                            .limit(50);
+                        const { data: actData, error: actError } = await supabase.from('activities').select('*').order('created_at', { ascending: false }).limit(50);
                         if (actError) throw actError;
                         result = { success: true, data: actData || [] };
                         break;
-                        
                     case 'add_activity':
-                        const { error: addActError } = await supabase
-                            .from('activities')
-                            .insert([{
-                                type: data.type,
-                                message: data.message,
-                                time: data.time
-                            }]);
+                        const { error: addActError } = await supabase.from('activities').insert([{ type: data.type, message: data.message, time: data.time }]);
                         if (addActError) throw addActError;
-                        // Limpiar actividades antiguas (mantener 50)
-                        await supabase.rpc('delete_old_activities');
                         result = { success: true };
                         break;
-                        
                     case 'get_settings':
-                        const { data: settingsData, error: settingsError } = await supabase
-                            .from('settings')
-                            .select('*');
+                        const { data: settingsData, error: settingsError } = await supabase.from('settings').select('*');
                         if (settingsError) throw settingsError;
                         const settingsObj = {};
                         (settingsData || []).forEach(s => { settingsObj[s.setting_key] = s.setting_value; });
                         result = { success: true, data: settingsObj };
                         break;
-                        
                     case 'save_settings':
                         for (const [key, value] of Object.entries(data)) {
-                            const { error: settingError } = await supabase
-                                .from('settings')
-                                .upsert({ setting_key: key, setting_value: value }, { onConflict: 'setting_key' });
+                            const { error: settingError } = await supabase.from('settings').upsert({ setting_key: key, setting_value: value }, { onConflict: 'setting_key' });
                             if (settingError) throw settingError;
                         }
                         result = { success: true };
                         break;
-                        
                     default:
                         result = { error: 'Acción no válida' };
                 }
-                
-                if (result.success !== undefined) {
-                    setDbStatus(true);
-                }
+                if (result.success !== undefined) setDbStatus(true);
                 return result;
             } catch (e) {
+                console.warn('Supabase falló, usando localStorage:', e.message);
                 setDbStatus(false);
-                console.error('Supabase Error:', e);
-                return { error: e.message };
+                return handleLocalStorage(action, data);
+            }
+        }
+
+        function handleLocalStorage(action, data) {
+            switch(action) {
+                case 'get_clients':
+                    return { success: true, data: JSON.parse(localStorage.getItem('bm_clients')) || [] };
+                case 'save_client':
+                    let clients = JSON.parse(localStorage.getItem('bm_clients')) || [];
+                    const idx = clients.findIndex(c => c.id === data.id);
+                    if (idx !== -1) clients[idx] = data; else clients.push(data);
+                    localStorage.setItem('bm_clients', JSON.stringify(clients));
+                    return { success: true };
+                case 'delete_client':
+                    let clientsDel = JSON.parse(localStorage.getItem('bm_clients')) || [];
+                    clientsDel = clientsDel.filter(c => c.id !== data.id);
+                    localStorage.setItem('bm_clients', JSON.stringify(clientsDel));
+                    return { success: true };
+                case 'update_tracking':
+                    let clientsT = JSON.parse(localStorage.getItem('bm_clients')) || [];
+                    const cT = clientsT.find(c => c.id === data.id);
+                    if (cT) { cT.trackingNumber = data.trackingNumber; localStorage.setItem('bm_clients', JSON.stringify(clientsT)); }
+                    return { success: true };
+                case 'update_status':
+                    let clientsS = JSON.parse(localStorage.getItem('bm_clients')) || [];
+                    const cS = clientsS.find(c => c.id === data.id);
+                    if (cS) { cS.status = data.status; cS.progress = data.status === 'preparando' ? 25 : data.status === 'enviado' ? 60 : 100; localStorage.setItem('bm_clients', JSON.stringify(clientsS)); }
+                    return { success: true };
+                case 'get_activities':
+                    return { success: true, data: JSON.parse(localStorage.getItem('bm_activities')) || [] };
+                case 'add_activity':
+                    let acts = JSON.parse(localStorage.getItem('bm_activities')) || [];
+                    acts.unshift(data);
+                    if (acts.length > 50) acts = acts.slice(0, 50);
+                    localStorage.setItem('bm_activities', JSON.stringify(acts));
+                    return { success: true };
+                case 'get_settings':
+                    return { success: true, data: { user_name: localStorage.getItem('bm_user_name') || 'Tu Nombre' } };
+                case 'save_settings':
+                    if (data.user_name) localStorage.setItem('bm_user_name', data.user_name);
+                    return { success: true };
+                default:
+                    return { error: 'Acción no válida' };
             }
         }
 
@@ -779,22 +795,19 @@
             const text = document.getElementById('dbStatusText');
             if (connected) {
                 el.className = 'db-status connected';
-                text.textContent = 'Base de datos conectada';
+                text.textContent = useLocalStorage ? 'Modo local (Supabase no configurado)' : 'Base de datos conectada';
             } else {
                 el.className = 'db-status error';
-                text.textContent = 'Error de conexión';
+                text.textContent = 'Error - Usando modo local';
             }
         }
 
-        // ===== INIT =====
         document.addEventListener('DOMContentLoaded', async () => {
             updateDate();
             addItemRow();
             setDefaultDates();
             setupSearch();
             setupUploadButton();
-            
-            // Cargar datos de Supabase
             await loadData();
             
             const ventasTable = document.getElementById('ventasTable');
@@ -827,14 +840,14 @@
                 renderAll();
             } catch (e) {
                 console.error('Error cargando datos:', e);
-                showToast('Error al cargar datos de la base de datos', 'error');
+                showToast('Error al cargar datos', 'error');
             }
         }
 
         async function saveToDB(action, data) {
             const res = await apiCall(action, data);
             if (!res.success) {
-                showToast('Error al guardar en la base de datos: ' + (res.error || ''), 'error');
+                showToast('Error al guardar: ' + (res.error || ''), 'error');
             }
             return res;
         }
@@ -850,7 +863,7 @@
                 userName = newName.trim();
                 await saveToDB('save_settings', { user_name: userName });
                 loadUserName();
-                showToast('Nombre actualizado y guardado');
+                showToast('Nombre actualizado');
             }
         }
 
@@ -930,11 +943,11 @@
                 if (index !== -1) clients[index] = newClient;
                 editingClientId = null;
                 await saveToDB('add_activity', { type: 'edit', message: `Cliente actualizado: ${newClient.name}`, time: new Date().toISOString() });
-                showToast('Cliente actualizado y guardado');
+                showToast('Cliente actualizado');
             } else {
                 clients.push(newClient);
                 await saveToDB('add_activity', { type: 'new', message: `Nuevo cliente: ${newClient.name} - ${newClient.model}`, time: new Date().toISOString() });
-                showToast('Cliente guardado en base de datos');
+                showToast('Cliente guardado');
             }
 
             renderAll();
@@ -1035,7 +1048,7 @@
                 clients = clients.filter(c => c.id !== id);
                 await saveToDB('add_activity', { type: 'delete', message: `Cliente eliminado: ${client ? client.name : 'Desconocido'}`, time: new Date().toISOString() });
                 renderAll();
-                showToast('Cliente eliminado de la base de datos');
+                showToast('Cliente eliminado');
             }
         }
 
@@ -1144,7 +1157,7 @@
                 client.progress = newStatus === 'preparando' ? 25 : newStatus === 'enviado' ? 60 : 100;
                 await saveToDB('update_status', { id, status: newStatus });
                 renderAll();
-                showToast('Estado actualizado y guardado');
+                showToast('Estado actualizado');
             }
         }
 
@@ -1206,7 +1219,6 @@
             }).join('');
         }
 
-        // Las funciones de exportación (Excel/PDF) permanecen igual
         function exportVentasExcel() {
             const data = getSelectedOrFiltered();
             if (data.length === 0) { showToast('Sin datos para exportar', 'error'); return; }
@@ -1234,7 +1246,7 @@
             ws2['B5'].s = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '5015BD' } } };
             XLSX.utils.book_append_sheet(wb, ws2, 'Resumen');
             XLSX.writeFile(wb, `beauxmoda_ventas_${new Date().toISOString().split('T')[0]}.xlsx`);
-            showToast(`Excel descargado (${data.length} registros${isExportingSelected ? ' seleccionados' : ''})`);
+            showToast(`Excel descargado (${data.length} registros)`);
         }
 
         function exportVentasPDF() {
@@ -1244,9 +1256,9 @@
             const printWindow = window.open('', '_blank');
             const today = new Date().toLocaleDateString('es-PE');
             const totalRevenue = data.reduce((sum, c) => sum + (c.price || 0), 0);
-            printWindow.document.write(`<html><head><title>Beaux Moda - Ventas y Envíos - ${today}</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet"><style>body{font-family:'Montserrat',Arial,sans-serif;padding:20px;color:#333;}.header-logo{text-align:center;margin-bottom:20px;padding-bottom:15px;border-bottom:2px solid #1a1a2e;}.header-logo .logo-beaux{font-family:'Playfair Display',Georgia,serif;font-size:36pt;font-weight:900;letter-spacing:8px;color:#1a1a2e;}.header-logo .logo-moda{font-size:12pt;letter-spacing:12px;color:#1a1a2e;text-align:right;padding-right:20px;margin-top:-5px;}h1{color:#3D0A49;font-size:18pt;margin-top:15px;}table{width:100%;border-collapse:collapse;margin-top:15px;font-size:11px;}th{background:#3D0A49;color:white;padding:8px;text-align:left;}td{padding:6px 8px;border-bottom:1px solid #e0d8f0;}tr:nth-child(even){background:#f8f5ff;}.total{font-size:16px;font-weight:bold;color:#027FE9;margin-top:20px;padding:12px;background:#f0e8f8;border-radius:8px;}.stat{background:#f0e8f8;padding:12px;border-radius:8px;text-align:center;display:inline-block;margin:5px;min-width:120px;}.stat-value{font-size:20px;font-weight:bold;color:#3D0A49;}.stat-label{font-size:11px;color:#5015BD;}.info-box{background:#fff3cd;border:1px solid #ffc107;padding:10px;border-radius:6px;margin:10px 0;font-size:12px;}</style></head><body><div class="header-logo"><div class="logo-beaux">BEAUX</div><div class="logo-moda">MODA</div></div><h1> Reporte de Ventas y Envíos</h1>${isExportingSelected ? `<div class="info-box">ℹ️ Exportando <strong>${data.length} registro(s) seleccionado(s)</strong></div>` : ''}<p><strong>Fecha:</strong> ${today} | <strong>Registros:</strong> ${data.length}</p><div style="margin:15px 0;"><div class="stat"><div class="stat-value">${data.length}</div><div class="stat-label">Total Pedidos</div></div><div class="stat"><div class="stat-value">S/ ${totalRevenue.toFixed(2)}</div><div class="stat-label">Ingresos</div></div><div class="stat"><div class="stat-value">${data.filter(c=>c.payment==='pagado').length}</div><div class="stat-label">Pagados</div></div><div class="stat"><div class="stat-value">${data.filter(c=>c.status==='entregado').length}</div><div class="stat-label">Entregados</div></div></div><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Prenda(s)</th><th>Total</th><th>Pago</th><th>Courier</th><th>N° Guía</th><th>Estado</th></tr></thead><tbody>${data.map(c => `<tr><td>${c.date ? new Date(c.date+'T00:00:00').toLocaleDateString('es-PE') : '-'}</td><td><strong>${c.name}</strong><br><small>${c.phone||''}</small></td><td>${c.model||'-'}</td><td><strong>S/ ${c.price.toFixed(2)}</strong></td><td>${c.payment||'-'}</td><td>${c.courier||'-'}</td><td>${c.trackingNumber||'-'}</td><td>${c.status||'-'}</td></tr>`).join('')}</tbody></table><div class="total">💰 TOTAL: S/ ${totalRevenue.toFixed(2)}</div><script>window.onload=function(){window.print();}<\/script></body></html>`);
+            printWindow.document.write(`<html><head><title>Beaux Moda - Ventas y Envíos - ${today}</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet"><style>body{font-family:'Montserrat',Arial,sans-serif;padding:20px;color:#333;}.header-logo{text-align:center;margin-bottom:20px;padding-bottom:15px;border-bottom:2px solid #1a1a2e;}.header-logo .logo-beaux{font-family:'Playfair Display',Georgia,serif;font-size:36pt;font-weight:900;letter-spacing:8px;color:#1a1a2e;}.header-logo .logo-moda{font-size:12pt;letter-spacing:12px;color:#1a1a2e;text-align:right;padding-right:20px;margin-top:-5px;}h1{color:#3D0A49;font-size:18pt;margin-top:15px;}table{width:100%;border-collapse:collapse;margin-top:15px;font-size:11px;}th{background:#3D0A49;color:white;padding:8px;text-align:left;}td{padding:6px 8px;border-bottom:1px solid #e0d8f0;}tr:nth-child(even){background:#f8f5ff;}.total{font-size:16px;font-weight:bold;color:#027FE9;margin-top:20px;padding:12px;background:#f0e8f8;border-radius:8px;}.stat{background:#f0e8f8;padding:12px;border-radius:8px;text-align:center;display:inline-block;margin:5px;min-width:120px;}.stat-value{font-size:20px;font-weight:bold;color:#3D0A49;}.stat-label{font-size:11px;color:#5015BD;}.info-box{background:#fff3cd;border:1px solid #ffc107;padding:10px;border-radius:6px;margin:10px 0;font-size:12px;}</style></head><body><div class="header-logo"><div class="logo-beaux">BEAUX</div><div class="logo-moda">MODA</div></div><h1>📦 Reporte de Ventas y Envíos</h1>${isExportingSelected ? `<div class="info-box">ℹ️ Exportando <strong>${data.length} registro(s) seleccionado(s)</strong></div>` : ''}<p><strong>Fecha:</strong> ${today} | <strong>Registros:</strong> ${data.length}</p><div style="margin:15px 0;"><div class="stat"><div class="stat-value">${data.length}</div><div class="stat-label">Total Pedidos</div></div><div class="stat"><div class="stat-value">S/ ${totalRevenue.toFixed(2)}</div><div class="stat-label">Ingresos</div></div><div class="stat"><div class="stat-value">${data.filter(c=>c.payment==='pagado').length}</div><div class="stat-label">Pagados</div></div><div class="stat"><div class="stat-value">${data.filter(c=>c.status==='entregado').length}</div><div class="stat-label">Entregados</div></div></div><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Prenda(s)</th><th>Total</th><th>Pago</th><th>Courier</th><th>N° Guía</th><th>Estado</th></tr></thead><tbody>${data.map(c => `<tr><td>${c.date ? new Date(c.date+'T00:00:00').toLocaleDateString('es-PE') : '-'}</td><td><strong>${c.name}</strong><br><small>${c.phone||''}</small></td><td>${c.model||'-'}</td><td><strong>S/ ${c.price.toFixed(2)}</strong></td><td>${c.payment||'-'}</td><td>${c.courier||'-'}</td><td>${c.trackingNumber||'-'}</td><td>${c.status||'-'}</td></tr>`).join('')}</tbody></table><div class="total">💰 TOTAL: S/ ${totalRevenue.toFixed(2)}</div><script>window.onload=function(){window.print();}<\/script></body></html>`);
             printWindow.document.close();
-            showToast(`PDF generado (${data.length} registros${isExportingSelected ? ' seleccionados' : ''})`);
+            showToast(`PDF generado (${data.length} registros)`);
         }
 
         function renderMetricas() {
@@ -1302,7 +1314,7 @@
             const sortedPrendas = Object.entries(prendaCount).sort((a, b) => b[1] - a[1]).slice(0, 10);
             const courierCount = {}; data.forEach(c => { const co = c.courier || 'Sin asignar'; courierCount[co] = (courierCount[co] || 0) + 1; });
             const platCount = {}; data.forEach(c => { const p = c.tag || 'manual'; platCount[p] = (platCount[p] || 0) + 1; });
-            printWindow.document.write(`<html><head><title>Beaux Moda - Reporte Métricas - ${today}</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet"><style>body{font-family:'Montserrat',Arial,sans-serif;padding:20px;color:#333;}.header-logo{text-align:center;margin-bottom:20px;padding-bottom:15px;border-bottom:2px solid #1a1a2e;}.header-logo .logo-beaux{font-family:'Playfair Display',Georgia,serif;font-size:36pt;font-weight:900;letter-spacing:8px;color:#1a1a2e;}.header-logo .logo-moda{font-size:12pt;letter-spacing:12px;color:#1a1a2e;text-align:right;padding-right:20px;margin-top:-5px;}h1{color:#3D0A49;font-size:18pt;margin-top:15px;}h2{color:#5015BD;margin-top:20px;}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin:20px 0;}.stat{background:#f0e8f8;padding:15px;border-radius:8px;text-align:center;}.stat-value{font-size:24px;font-weight:bold;color:#3D0A49;}.stat-label{font-size:12px;color:#5015BD;}table{width:100%;border-collapse:collapse;margin-top:15px;font-size:12px;}th{background:#3D0A49;color:white;padding:8px;text-align:left;}td{padding:6px 8px;border-bottom:1px solid #e0d8f0;}tr:nth-child(even){background:#f8f5ff;}</style></head><body><div class="header-logo"><div class="logo-beaux">BEAUX</div><div class="logo-moda">MODA</div></div><h1> Reporte de Métricas</h1><p><strong>Fecha:</strong> ${today}</p><div class="stats"><div class="stat"><div class="stat-value">${data.length}</div><div class="stat-label">Total Clientes</div></div><div class="stat"><div class="stat-value">S/ ${totalRevenue.toFixed(2)}</div><div class="stat-label">Ingresos Totales</div></div><div class="stat"><div class="stat-value">S/ ${ticketPromedio.toFixed(2)}</div><div class="stat-label">Ticket Promedio</div></div><div class="stat"><div class="stat-value">${data.filter(c=>c.payment==='pagado').length}</div><div class="stat-label">Pagados</div></div></div><h2>Top 10 Prendas Más Vendidas</h2><table><thead><tr><th>#</th><th>Prenda</th><th>Ventas</th></tr></thead><tbody>${sortedPrendas.map((p,i) => `<tr><td>${i+1}</td><td>${p[0]}</td><td>${p[1]}</td></tr>`).join('')}</tbody></table><h2>Ventas por Courier</h2><table><thead><tr><th>Courier</th><th>Cantidad</th><th>%</th></tr></thead><tbody>${Object.entries(courierCount).map(([c,n]) => `<tr><td>${c}</td><td>${n}</td><td>${((n/data.length)*100).toFixed(1)}%</td></tr>`).join('')}</tbody></table><h2>Ventas por Plataforma</h2><table><thead><tr><th>Plataforma</th><th>Cantidad</th><th>%</th></tr></thead><tbody>${Object.entries(platCount).map(([p,n]) => `<tr><td>${p}</td><td>${n}</td><td>${((n/data.length)*100).toFixed(1)}%</td></tr>`).join('')}</tbody></table><script>window.onload=function(){window.print();}<\/script></body></html>`);
+            printWindow.document.write(`<html><head><title>Beaux Moda - Reporte Métricas - ${today}</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet"><style>body{font-family:'Montserrat',Arial,sans-serif;padding:20px;color:#333;}.header-logo{text-align:center;margin-bottom:20px;padding-bottom:15px;border-bottom:2px solid #1a1a2e;}.header-logo .logo-beaux{font-family:'Playfair Display',Georgia,serif;font-size:36pt;font-weight:900;letter-spacing:8px;color:#1a1a2e;}.header-logo .logo-moda{font-size:12pt;letter-spacing:12px;color:#1a1a2e;text-align:right;padding-right:20px;margin-top:-5px;}h1{color:#3D0A49;font-size:18pt;margin-top:15px;}h2{color:#5015BD;margin-top:20px;}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin:20px 0;}.stat{background:#f0e8f8;padding:15px;border-radius:8px;text-align:center;}.stat-value{font-size:24px;font-weight:bold;color:#3D0A49;}.stat-label{font-size:12px;color:#5015BD;}table{width:100%;border-collapse:collapse;margin-top:15px;font-size:12px;}th{background:#3D0A49;color:white;padding:8px;text-align:left;}td{padding:6px 8px;border-bottom:1px solid #e0d8f0;}tr:nth-child(even){background:#f8f5ff;}</style></head><body><div class="header-logo"><div class="logo-beaux">BEAUX</div><div class="logo-moda">MODA</div></div><h1>📊 Reporte de Métricas</h1><p><strong>Fecha:</strong> ${today}</p><div class="stats"><div class="stat"><div class="stat-value">${data.length}</div><div class="stat-label">Total Clientes</div></div><div class="stat"><div class="stat-value">S/ ${totalRevenue.toFixed(2)}</div><div class="stat-label">Ingresos Totales</div></div><div class="stat"><div class="stat-value">S/ ${ticketPromedio.toFixed(2)}</div><div class="stat-label">Ticket Promedio</div></div><div class="stat"><div class="stat-value">${data.filter(c=>c.payment==='pagado').length}</div><div class="stat-label">Pagados</div></div></div><h2>Top 10 Prendas Más Vendidas</h2><table><thead><tr><th>#</th><th>Prenda</th><th>Ventas</th></tr></thead><tbody>${sortedPrendas.map((p,i) => `<tr><td>${i+1}</td><td>${p[0]}</td><td>${p[1]}</td></tr>`).join('')}</tbody></table><h2>Ventas por Courier</h2><table><thead><tr><th>Courier</th><th>Cantidad</th><th>%</th></tr></thead><tbody>${Object.entries(courierCount).map(([c,n]) => `<tr><td>${c}</td><td>${n}</td><td>${((n/data.length)*100).toFixed(1)}%</td></tr>`).join('')}</tbody></table><h2>Ventas por Plataforma</h2><table><thead><tr><th>Plataforma</th><th>Cantidad</th><th>%</th></tr></thead><tbody>${Object.entries(platCount).map(([p,n]) => `<tr><td>${p}</td><td>${n}</td><td>${((n/data.length)*100).toFixed(1)}%</td></tr>`).join('')}</tbody></table><script>window.onload=function(){window.print();}<\/script></body></html>`);
             printWindow.document.close();
             showToast('PDF de métricas generado');
         }
